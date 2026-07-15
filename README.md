@@ -20,7 +20,7 @@ The TTS subspec transitively includes the Navi, Map, and Base subspecs.
 ```ruby
 pod 'UtsBaiduNavBridge',
     :git => 'https://github.com/GM-HaoPeng/uts-baidu-nav-bridge-ios.git',
-    :tag => '0.1.0'
+    :tag => '0.1.1'
 ```
 
 For a DCloud UTS plugin, add the same repository and tag under
@@ -50,6 +50,10 @@ Version `0.1.0` provides the module boundary and minimal lifecycle APIs:
 
 Route planning, navigation UI, and navigation event adapters are intentionally
 added in later versions after this module is verified in DCloud cloud packaging.
+
+Version `0.1.1` also enables dead stripping in the consuming target. DCloud's
+UTS iOS framework build disables dead stripping in Debug builds, which otherwise
+links duplicate `pb_tools.o` symbols from Baidu MapSDK and NaviSDK 6.6.7.
 
 ## License
 
