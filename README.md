@@ -20,7 +20,7 @@ The TTS subspec transitively includes the Navi, Map, and Base subspecs.
 ```ruby
 pod 'UtsBaiduNavBridge',
     :git => 'https://github.com/GM-HaoPeng/uts-baidu-nav-bridge-ios.git',
-    :tag => '0.1.4'
+    :tag => '0.1.5'
 ```
 
 For a DCloud UTS plugin, add the same repository and tag under
@@ -65,6 +65,9 @@ camera controls, progress events, native failures, and deterministic timeouts.
 
 Version `0.1.4` aligns ordinary driving route-plan dispatch with the official
 demo's nil userInfo path and reports route-manager acceptance diagnostics.
+
+Version `0.1.5` upgrades the official Baidu navigation CocoaPod dependency from
+6.6.7 to 7.1.0 after 6.6.7 accepted route nodes but did not start route planning.
 
 ## License
 

@@ -404,7 +404,7 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
 }
 
 - (void)applyNavigationPresentationOptions {
-  BNaviService_Strategy.speakMode = self.voiceEnabled ? BN_Speak_Mode_High : BN_Speak_Mode_Low;
+  BNaviService_Strategy.naviSpeakMode = self.voiceEnabled ? BN_SpeakMode_Real_Play : BN_SpeakMode_Real_Mute;
   if (self.cameraFollowingEnabled) {
     [[BNaviModel getInstance] mapExitViewAllMode];
   } else {
@@ -621,7 +621,7 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
       completion([self navigationPayloadWithSuccess:NO code:@"BAIDU_NAVSDK_SESSION_MISSING" message:@"No active Baidu navigation session is available." navigationId:bridge.navigationId status:@"failed"]);
       return;
     }
-    BNaviService_Strategy.speakMode = enabled ? BN_Speak_Mode_High : BN_Speak_Mode_Low;
+    BNaviService_Strategy.naviSpeakMode = enabled ? BN_SpeakMode_Real_Play : BN_SpeakMode_Real_Mute;
     bridge.voiceEnabled = enabled;
     NSString *message = enabled ? @"Baidu navigation voice enabled." : @"Baidu navigation voice disabled.";
     [bridge emitEventType:@"voiceInstructionUpdated" status:@"navigating" extras:@{@"voiceInstructionText": message}];
@@ -763,7 +763,12 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
 
 + (void)stopServices {
   [self performOnMainThread:^{
-    [[BNaviService getInstance] stopServices];
+    UtsBaiduNavBridge *bridge = [self sharedBridge];
+    if (bridge.navigationActive) {
+      [BNaviService_naviCoreLogicManager stopNavi:bridge.naviType extParam:nil];
+    }
+    [BNaviService_Sound releaseInstance];
+    [bridge clearNavigationState];
   }];
 }
 

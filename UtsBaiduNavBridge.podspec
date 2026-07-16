@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name = 'UtsBaiduNavBridge'
-  s.version = '0.1.4'
+  s.version = '0.1.5'
   s.summary = 'A small Objective-C module bridge for Baidu iOS Navigation SDK.'
   s.description = <<-DESC
 Exposes bridge-safe Foundation APIs for Swift and UTS while keeping Baidu
@@ -22,7 +22,7 @@ Navigation SDK Objective-C headers out of the consuming module interface.
   s.source_files = 'Sources/**/*.{h,m}'
   s.public_header_files = 'Sources/UtsBaiduNavBridge.h'
   s.frameworks = 'Foundation', 'UIKit'
-  s.dependency 'BaiduNaviKit-All/TTS', '6.6.7'
+  s.dependency 'BaiduNaviKit-All/TTS', '7.1.0'
 
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES'
