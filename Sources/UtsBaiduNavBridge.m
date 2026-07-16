@@ -24,6 +24,7 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
 @property (nonatomic, assign) BOOL stoppingNavigation;
 @property (nonatomic, assign) BOOL voiceEnabled;
 @property (nonatomic, assign) BOOL cameraFollowingEnabled;
+@property (nonatomic, assign) BOOL usesSdkUI;
 
 @end
 
@@ -394,6 +395,7 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
 - (void)clearNavigationState {
   self.navigationActive = NO;
   self.stoppingNavigation = NO;
+  self.usesSdkUI = NO;
   self.startToken += 1;
   self.replanToken += 1;
   self.startCompletion = nil;
@@ -456,6 +458,8 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
     bridge.naviType = [options[@"isSimulateNavigationEnabled"] boolValue] ? BN_NaviTypeSimulator : BN_NaviTypeReal;
     bridge.voiceEnabled = options[@"isVoiceBroadcastEnabled"] == nil || [options[@"isVoiceBroadcastEnabled"] boolValue];
     bridge.cameraFollowingEnabled = options[@"isCameraFollowingLocationEnabled"] == nil || [options[@"isCameraFollowingLocationEnabled"] boolValue];
+    NSString *navigationUiMode = [options[@"navigationUiMode"] isKindOfClass:[NSString class]] ? options[@"navigationUiMode"] : @"sdk";
+    bridge.usesSdkUI = ![navigationUiMode isEqualToString:@"none"];
     bridge.routeNodes = nodes;
     bridge.eventHandler = eventHandler;
     bridge.startCompletion = completion;
@@ -574,8 +578,10 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
     bridge.stoppingNavigation = YES;
     [bridge emitEventType:@"navigationStopped" status:@"cancelled" extras:@{@"instructionText": @"stopRouteNavigation called."}];
     NSDictionary *payload = [self navigationPayloadWithSuccess:YES code:@"BAIDU_NAVSDK_NAVIGATION_STOPPED" message:@"Baidu navigation stopped." navigationId:navigationId status:@"cancelled"];
-    if (bridge.navigationActive) {
+    if (bridge.navigationActive && bridge.usesSdkUI) {
       [BNaviService_UI exitPage:EN_BNavi_ExitAllVC animated:YES extraInfo:@{}];
+    } else if (bridge.navigationActive) {
+      [BNaviService_naviCoreLogicManager stopNavi:bridge.naviType extParam:nil];
     }
     completion(payload);
     if ([bridge.navigationId isEqualToString:navigationId]) {
@@ -656,15 +662,33 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
   self.startToken += 1;
   self.navigationActive = YES;
   @try {
-    [BNaviService_UI showPage:BNaviUI_NormalNavi
-                     delegate:self
-                    extParams:@{BNaviUI_NormalNavi_TypeKey: @(self.naviType)}];
-    [self emitEventType:@"navigationStarted" status:@"navigating" extras:@{@"instructionText": @"iOS NavSDK navigation started."}];
-    [self finishStartSuccess:YES code:@"BAIDU_NAVSDK_NAVIGATION_STARTED" message:@"Baidu navigation route planned and SDK UI started." status:@"navigating"];
+    if (self.usesSdkUI) {
+      [BNaviService_UI showPage:BNaviUI_NormalNavi
+                       delegate:self
+                      extParams:@{BNaviUI_NormalNavi_TypeKey: @(self.naviType)}];
+      [self emitEventType:@"navigationStarted" status:@"navigating" extras:@{@"instructionText": @"iOS NavSDK navigation started with SDK UI."}];
+      [self finishStartSuccess:YES code:@"BAIDU_NAVSDK_NAVIGATION_STARTED" message:@"Baidu navigation route planned and SDK UI started." status:@"navigating"];
+      return;
+    }
+    [self applyNavigationPresentationOptions];
+    NSError *startError = [BNaviService_naviCoreLogicManager startNavi:self.naviType extParam:nil];
+    if (startError != nil && startError.code > 0) {
+      NSString *message = startError.localizedDescription ?: @"Baidu navigation core failed to start.";
+      NSDictionary *failure = [UtsBaiduNavBridge navigationPayloadWithSuccess:NO code:[NSString stringWithFormat:@"%ld", (long)startError.code] message:message navigationId:self.navigationId status:@"failed"];
+      [self emitEventType:@"navigationFailed" status:@"failed" extras:@{@"error": failure}];
+      [self finishStartSuccess:NO code:@"BAIDU_NAVSDK_CORE_START_FAILED" message:message status:@"failed"];
+      [self clearNavigationState];
+      return;
+    }
+    [self emitEventType:@"navigationStarted" status:@"navigating" extras:@{@"instructionText": @"iOS NavSDK no-UI navigation started."}];
+    [self finishStartSuccess:YES code:@"BAIDU_NAVSDK_NAVIGATION_STARTED" message:@"Baidu navigation route planned and no-UI navigation started." status:@"navigating"];
   } @catch (NSException *exception) {
-    NSDictionary *failure = [UtsBaiduNavBridge navigationPayloadWithSuccess:NO code:@"BAIDU_NAVSDK_UI_START_FAILED" message:exception.reason ?: @"Baidu navigation UI failed to start." navigationId:self.navigationId status:@"failed"];
+    NSString *failureCode = self.usesSdkUI ? @"BAIDU_NAVSDK_UI_START_FAILED" : @"BAIDU_NAVSDK_CORE_START_FAILED";
+    NSString *fallbackMessage = self.usesSdkUI ? @"Baidu navigation UI failed to start." : @"Baidu navigation core failed to start.";
+    NSString *failureMessage = exception.reason ?: fallbackMessage;
+    NSDictionary *failure = [UtsBaiduNavBridge navigationPayloadWithSuccess:NO code:failureCode message:failureMessage navigationId:self.navigationId status:@"failed"];
     [self emitEventType:@"navigationFailed" status:@"failed" extras:@{@"error": failure}];
-    [self finishStartSuccess:NO code:@"BAIDU_NAVSDK_UI_START_FAILED" message:exception.reason ?: @"Baidu navigation UI failed to start." status:@"failed"];
+    [self finishStartSuccess:NO code:failureCode message:failureMessage status:@"failed"];
     [self clearNavigationState];
   }
 }
