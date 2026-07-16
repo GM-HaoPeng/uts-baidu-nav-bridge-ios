@@ -464,30 +464,71 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
     bridge.startToken += 1;
     NSUInteger token = bridge.startToken;
     [[BNaviModel getInstance] addNaviModelListener:bridge];
+    id<BNRoutePlanManagerProtocol> routePlanManager = BNaviService_RoutePlan;
+    if (routePlanManager == nil) {
+      [bridge finishStartSuccess:NO
+                            code:@"BAIDU_NAVSDK_ROUTE_MANAGER_MISSING"
+                         message:@"Baidu navigation route-plan manager is unavailable."
+                          status:@"failed"];
+      [bridge clearNavigationState];
+      return;
+    }
+    BOOL respondsToSuccess = [bridge respondsToSelector:@selector(routePlanDidFinished:)];
+    BOOL respondsToFailure = [bridge respondsToSelector:@selector(routePlanDidFailedWithError:andUserInfo:)];
+    BOOL respondsToCancel = [bridge respondsToSelector:@selector(routePlanDidUserCanceled:)];
     [bridge emitEventType:@"routeProgressUpdated"
                    status:@"rerouting"
-                   extras:@{@"instructionText": @"iOS NavSDK navigation request accepted."}];
+                   extras:@{
+                     @"instructionText": @"iOS NavSDK navigation request accepted.",
+                     @"nativeDiagnostic": @{
+                       @"isMainThread": @([NSThread isMainThread]),
+                       @"servicesInitialized": @([[BNaviService getInstance] isServicesInited]),
+                       @"nodeCount": @(nodes.count),
+                       @"respondsToSuccess": @(respondsToSuccess),
+                       @"respondsToFailure": @(respondsToFailure),
+                       @"respondsToCancel": @(respondsToCancel)
+                     }
+                   }];
     NSLog(@"[UtsBaiduNavBridge] routePlan before nodes=%lu simulate=%d", (unsigned long)nodes.count, bridge.naviType == BN_NaviTypeSimulator);
-    [BNaviService_RoutePlan startNaviRoutePlan:BNRoutePlanMode_Recommend
-                                    naviNodes:nodes
-                                         time:nil
-                                     delegete:bridge
-                                     userInfo:@{BNaviTripTypeKey: @(BN_NaviTypeReal)}];
+    [routePlanManager startNaviRoutePlan:BNRoutePlanMode_Recommend
+                               naviNodes:nodes
+                                    time:nil
+                                delegete:bridge
+                                userInfo:nil];
     NSLog(@"[UtsBaiduNavBridge] routePlan after");
+    NSInteger acceptedNodeCount = [routePlanManager getCurNodeCount];
+    int acceptedRoutePlanMode = [routePlanManager getCurRoutePlanMode];
+    [bridge emitEventType:@"routeProgressUpdated"
+                   status:@"rerouting"
+                   extras:@{
+                     @"instructionText": @"iOS NavSDK route-plan request dispatched.",
+                     @"nativeDiagnostic": @{
+                       @"acceptedNodeCount": @(acceptedNodeCount),
+                       @"acceptedRoutePlanMode": @(acceptedRoutePlanMode),
+                       @"isMainThread": @([NSThread isMainThread])
+                     }
+                   }];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(UTSBaiduNavBridgeRouteTimeout * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
       if (bridge.startCompletion == nil || bridge.startToken != token) {
         return;
       }
+      NSString *timeoutMessage = [NSString stringWithFormat:@"Baidu navigation route planning timed out. managerNodeCount=%ld routePlanMode=%d mainThread=%d delegateSuccess=%d delegateFailure=%d delegateCancel=%d",
+                                  (long)[routePlanManager getCurNodeCount],
+                                  [routePlanManager getCurRoutePlanMode],
+                                  [NSThread isMainThread],
+                                  respondsToSuccess,
+                                  respondsToFailure,
+                                  respondsToCancel];
       NSDictionary *failure = [self navigationPayloadWithSuccess:NO
                                                               code:@"BAIDU_NAVSDK_ROUTE_PLAN_TIMEOUT"
-                                                           message:@"Baidu navigation route planning timed out."
+                                                           message:timeoutMessage
                                                       navigationId:bridge.navigationId
                                                             status:@"failed"];
       [bridge emitEventType:@"navigationFailed" status:@"failed" extras:@{@"error": failure}];
       [bridge finishStartSuccess:NO
                             code:@"BAIDU_NAVSDK_ROUTE_PLAN_TIMEOUT"
-                         message:@"Baidu navigation route planning timed out."
+                         message:timeoutMessage
                           status:@"failed"];
       [bridge clearNavigationState];
     });
