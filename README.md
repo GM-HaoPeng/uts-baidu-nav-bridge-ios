@@ -15,7 +15,7 @@ downloads the pinned official dependency during the consuming app build.
 
 The TTS subspec transitively includes the Navi, Map, and Base subspecs.
 
-Version `0.1.13` includes iOS system speech for navigation. Pass
+Version `0.1.14` includes iOS system speech for navigation. Pass
 `navigationVoice.ttsEngineType = "system"` to receive NavSDK instruction text
 through `BNNaviSoundDelegate` and speak it with `AVSpeechSynthesizer`, without
 Baidu TTS credentials. System speech keeps the current utterance uninterrupted,
@@ -27,7 +27,7 @@ for the navigation session to avoid choppy simulated-navigation playback.
 ```ruby
 pod 'UtsBaiduNavBridge',
     :git => 'https://github.com/GM-HaoPeng/uts-baidu-nav-bridge-ios.git',
-    :tag => '0.1.13'
+    :tag => '0.1.14'
 ```
 
 For a DCloud UTS plugin, add the same repository and tag under
@@ -110,6 +110,11 @@ through a plugin-owned `AVAudioEngine` media pipeline. Volume buttons therefore
 control the normal media volume instead of a temporary system prompt volume,
 while scheduled buffers reduce private speech-session interruptions. iOS 12
 keeps the direct `AVSpeechSynthesizer` fallback.
+
+Version `0.1.14` deep-copies every rendered PCM buffer before asynchronous
+playback. This prevents `AVSpeechSynthesizer` callback buffers from being reused
+or cleared before `AVAudioPlayerNode` consumes them. Player and mixer gain remain
+at `1.0`, and speaking diagnostics include the current media output volume.
 
 ## License
 

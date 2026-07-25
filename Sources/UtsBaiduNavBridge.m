@@ -753,6 +753,8 @@ static NSTimeInterval const UTSBaiduNavBridgeSpeechTransitionDelay = 0.18;
                    @"speechState": @"speaking",
                    @"usesDedicatedAudioSession": @(self.usesDedicatedSystemSpeechSession),
                    @"usesMediaAudioPipeline": @(self.usesRenderedSystemSpeech),
+                   @"copiesRenderedAudioBuffers": @(self.usesRenderedSystemSpeech),
+                   @"mediaOutputVolume": @([AVAudioSession sharedInstance].outputVolume),
                    @"transitionDelayMilliseconds": @(UTSBaiduNavBridgeSpeechTransitionDelay * 1000.0)
                  }
                }];
@@ -844,7 +846,31 @@ static NSTimeInterval const UTSBaiduNavBridgeSpeechTransitionDelay = 0.18;
       return NO;
     }
   }
+  playerNode.volume = 1.0;
+  engine.mainMixerNode.outputVolume = 1.0;
   return YES;
+}
+
+- (nullable AVAudioPCMBuffer *)copyRenderedSystemSpeechBuffer:(AVAudioPCMBuffer *)source {
+  AVAudioPCMBuffer *copy = [[AVAudioPCMBuffer alloc] initWithPCMFormat:source.format
+                                                         frameCapacity:source.frameLength];
+  if (copy == nil) {
+    return nil;
+  }
+  copy.frameLength = source.frameLength;
+  const AudioBufferList *sourceList = source.audioBufferList;
+  AudioBufferList *destinationList = copy.mutableAudioBufferList;
+  UInt32 bufferCount = MIN(sourceList->mNumberBuffers, destinationList->mNumberBuffers);
+  for (UInt32 index = 0; index < bufferCount; index += 1) {
+    const AudioBuffer sourceBuffer = sourceList->mBuffers[index];
+    AudioBuffer *destinationBuffer = &destinationList->mBuffers[index];
+    UInt32 byteCount = MIN(sourceBuffer.mDataByteSize, destinationBuffer->mDataByteSize);
+    if (byteCount > 0 && sourceBuffer.mData != NULL && destinationBuffer->mData != NULL) {
+      memcpy(destinationBuffer->mData, sourceBuffer.mData, byteCount);
+      destinationBuffer->mDataByteSize = byteCount;
+    }
+  }
+  return copy;
 }
 
 - (void)finishRenderedSystemSpeechIfReady:(NSUInteger)renderToken {
@@ -888,8 +914,23 @@ static NSTimeInterval const UTSBaiduNavBridgeSpeechTransitionDelay = 0.18;
         strongSelf.activeSystemSpeechText = @"";
         return;
       }
+      AVAudioPCMBuffer *scheduledBuffer = [strongSelf copyRenderedSystemSpeechBuffer:pcmBuffer];
+      if (scheduledBuffer == nil) {
+        [strongSelf emitEventType:@"voiceInstructionUpdated"
+                           status:@"navigating"
+                           extras:@{
+                             @"voiceInstructionText": activeText,
+                             @"nativeDiagnostic": @{
+                               @"voiceEngineType": @"system",
+                               @"speechState": @"audioBufferCopyFailed"
+                             }
+                           }];
+        strongSelf.systemSpeechRenderToken += 1;
+        strongSelf.activeSystemSpeechText = @"";
+        return;
+      }
       strongSelf.systemSpeechScheduledBufferCount += 1;
-      [strongSelf.systemSpeechPlayerNode scheduleBuffer:pcmBuffer
+      [strongSelf.systemSpeechPlayerNode scheduleBuffer:scheduledBuffer
                                                  atTime:nil
                                                 options:0
                                       completionHandler:^{
