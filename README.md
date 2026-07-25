@@ -15,12 +15,17 @@ downloads the pinned official dependency during the consuming app build.
 
 The TTS subspec transitively includes the Navi, Map, and Base subspecs.
 
+Version `0.1.9` adds iOS system speech for navigation. Pass
+`navigationVoice.ttsEngineType = "system"` to receive NavSDK instruction text
+through `BNNaviSoundDelegate` and speak it with `AVSpeechSynthesizer`, without
+Baidu TTS credentials.
+
 ## Installation
 
 ```ruby
 pod 'UtsBaiduNavBridge',
     :git => 'https://github.com/GM-HaoPeng/uts-baidu-nav-bridge-ios.git',
-    :tag => '0.1.8'
+    :tag => '0.1.9'
 ```
 
 For a DCloud UTS plugin, add the same repository and tag under

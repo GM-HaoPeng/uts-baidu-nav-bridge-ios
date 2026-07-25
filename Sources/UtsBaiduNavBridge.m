@@ -1,5 +1,6 @@
 #import "UtsBaiduNavBridge.h"
 
+#import <AVFoundation/AVFoundation.h>
 #import <UIKit/UIKit.h>
 #import <BaiduMapAPI_Base/BMKBaseComponent.h>
 #import <BaiduMapAPI_Map/BMKMapComponent.h>
@@ -10,7 +11,7 @@ static NSString *const UTSBaiduNavBridgeMarker = @"BAIDU_IOS_NAVSDK_BRIDGE_POD_I
 static NSTimeInterval const UTSBaiduNavBridgeCallbackTimeout = 20.0;
 static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
 
-@interface UtsBaiduNavBridge () <BNNaviRoutePlanDelegate, BNNaviUIManagerDelegate, BNaviModelDelegate>
+@interface UtsBaiduNavBridge () <BNNaviRoutePlanDelegate, BNNaviUIManagerDelegate, BNaviModelDelegate, BNNaviSoundDelegate, AVSpeechSynthesizerDelegate>
 
 @property (nonatomic, copy, nullable) UTSBaiduNavBridgePayloadCompletion startCompletion;
 @property (nonatomic, copy, nullable) UTSBaiduNavBridgePayloadCompletion replanCompletion;
@@ -25,6 +26,8 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
 @property (nonatomic, assign) BOOL voiceEnabled;
 @property (nonatomic, assign) BOOL cameraFollowingEnabled;
 @property (nonatomic, assign) BOOL usesSdkUI;
+@property (nonatomic, copy) NSString *voiceEngineType;
+@property (nonatomic, strong) AVSpeechSynthesizer *speechSynthesizer;
 
 @end
 
@@ -37,6 +40,9 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
     bridge = [[UtsBaiduNavBridge alloc] init];
     bridge.navigationId = @"";
     bridge.routeNodes = @[];
+    bridge.voiceEngineType = @"external";
+    bridge.speechSynthesizer = [[AVSpeechSynthesizer alloc] init];
+    bridge.speechSynthesizer.delegate = bridge;
   });
   return bridge;
 }
@@ -574,6 +580,10 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
 }
 
 - (void)clearNavigationState {
+  [self stopSystemSpeech];
+  if ([self usesCustomSoundDelegate]) {
+    [BNaviService_Sound setSoundDelegate:nil];
+  }
   self.navigationActive = NO;
   self.stoppingNavigation = NO;
   self.usesSdkUI = NO;
@@ -584,10 +594,86 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
   [[BNaviModel getInstance] removeNaviModelListener:self];
   self.routeNodes = @[];
   self.navigationId = @"";
+  self.voiceEngineType = @"external";
+}
+
+- (BOOL)usesCustomSoundDelegate {
+  return [self.voiceEngineType isEqualToString:@"system"] ||
+         [self.voiceEngineType isEqualToString:@"external"];
+}
+
+- (void)configureSoundDelegate {
+  if ([self usesCustomSoundDelegate]) {
+    [BNaviService_Sound setSoundDelegate:self];
+  } else {
+    [BNaviService_Sound setSoundDelegate:nil];
+  }
+}
+
+- (void)stopSystemSpeech {
+  if (![self.voiceEngineType isEqualToString:@"system"] &&
+      !self.speechSynthesizer.isSpeaking &&
+      !self.speechSynthesizer.isPaused) {
+    return;
+  }
+  if (self.speechSynthesizer.isSpeaking || self.speechSynthesizer.isPaused) {
+    [self.speechSynthesizer stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
+  }
+  NSError *sessionError = nil;
+  [[AVAudioSession sharedInstance] setActive:NO
+                                 withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
+                                       error:&sessionError];
+  if (sessionError != nil) {
+    NSLog(@"[UtsBaiduNavBridge] system TTS audio session deactivate failed code=%ld",
+          (long)sessionError.code);
+  }
+}
+
+- (void)speakSystemText:(NSString *)text {
+  if (!self.voiceEnabled || ![self.voiceEngineType isEqualToString:@"system"] || text.length == 0) {
+    return;
+  }
+  NSError *sessionError = nil;
+  AVAudioSession *session = [AVAudioSession sharedInstance];
+  [session setCategory:AVAudioSessionCategoryPlayback
+                  mode:AVAudioSessionModeSpokenAudio
+               options:AVAudioSessionCategoryOptionDuckOthers
+                 error:&sessionError];
+  if (sessionError == nil) {
+    [session setActive:YES error:&sessionError];
+  }
+  if (sessionError != nil) {
+    NSLog(@"[UtsBaiduNavBridge] system TTS audio session activate failed code=%ld",
+          (long)sessionError.code);
+    [self emitEventType:@"voiceInstructionUpdated"
+                 status:@"navigating"
+                 extras:@{
+                   @"voiceInstructionText": text,
+                   @"instructionText": text,
+                   @"nativeDiagnostic": @{
+                     @"voiceEngineType": @"system",
+                     @"speechState": @"audioSessionFailed",
+                     @"errorCode": @(sessionError.code)
+                   }
+                 }];
+    return;
+  }
+  if (self.speechSynthesizer.isSpeaking || self.speechSynthesizer.isPaused) {
+    [self.speechSynthesizer stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
+  }
+  AVSpeechUtterance *utterance = [AVSpeechUtterance speechUtteranceWithString:text];
+  AVSpeechSynthesisVoice *voice = [AVSpeechSynthesisVoice voiceWithLanguage:@"zh-CN"];
+  if (voice != nil) {
+    utterance.voice = voice;
+  }
+  utterance.rate = AVSpeechUtteranceDefaultSpeechRate;
+  utterance.volume = 1.0;
+  [self.speechSynthesizer speakUtterance:utterance];
 }
 
 - (void)applyNavigationPresentationOptions {
   BNaviService_Strategy.naviSpeakMode = self.voiceEnabled ? BN_SpeakMode_Real_Play : BN_SpeakMode_Real_Mute;
+  [self configureSoundDelegate];
   if (self.cameraFollowingEnabled) {
     [[BNaviModel getInstance] mapExitViewAllMode];
   } else {
@@ -639,6 +725,9 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
     bridge.naviType = [options[@"isSimulateNavigationEnabled"] boolValue] ? BN_NaviTypeSimulator : BN_NaviTypeReal;
     bridge.voiceEnabled = options[@"isVoiceBroadcastEnabled"] == nil || [options[@"isVoiceBroadcastEnabled"] boolValue];
     bridge.cameraFollowingEnabled = options[@"isCameraFollowingLocationEnabled"] == nil || [options[@"isCameraFollowingLocationEnabled"] boolValue];
+    NSDictionary<NSString *, id> *navigationVoice = [options[@"navigationVoice"] isKindOfClass:[NSDictionary class]] ? options[@"navigationVoice"] : nil;
+    NSString *voiceEngineType = [navigationVoice[@"ttsEngineType"] isKindOfClass:[NSString class]] ? navigationVoice[@"ttsEngineType"] : @"external";
+    bridge.voiceEngineType = [@[@"baiduBuiltin", @"system", @"external"] containsObject:voiceEngineType] ? voiceEngineType : @"external";
     NSString *navigationUiMode = [options[@"navigationUiMode"] isKindOfClass:[NSString class]] ? options[@"navigationUiMode"] : @"sdk";
     bridge.usesSdkUI = ![navigationUiMode isEqualToString:@"none"];
     bridge.routeNodes = nodes;
@@ -648,6 +737,7 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
     bridge.stoppingNavigation = NO;
     bridge.startToken += 1;
     NSUInteger token = bridge.startToken;
+    [bridge configureSoundDelegate];
     [[BNaviModel getInstance] addNaviModelListener:bridge];
     id<BNRoutePlanManagerProtocol> routePlanManager = BNaviService_RoutePlan;
     if (routePlanManager == nil) {
@@ -669,6 +759,7 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
                        @"isMainThread": @([NSThread isMainThread]),
                        @"servicesInitialized": @([[BNaviService getInstance] isServicesInited]),
                        @"nodeCount": @(nodes.count),
+                       @"voiceEngineType": bridge.voiceEngineType,
                        @"respondsToSuccess": @(respondsToSuccess),
                        @"respondsToFailure": @(respondsToFailure),
                        @"respondsToCancel": @(respondsToCancel)
@@ -781,6 +872,9 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
     if (bridge.naviType == BN_NaviTypeSimulator) {
       [[BNaviModel getInstance] pauseSimulator];
     }
+    if ([bridge.voiceEngineType isEqualToString:@"system"] && bridge.speechSynthesizer.isSpeaking) {
+      [bridge.speechSynthesizer pauseSpeakingAtBoundary:AVSpeechBoundaryWord];
+    }
     [bridge emitEventType:@"navigationPaused" status:@"paused" extras:nil];
     completion([self navigationPayloadWithSuccess:YES code:@"BAIDU_NAVSDK_NAVIGATION_PAUSED" message:@"Baidu navigation pause requested." navigationId:bridge.navigationId status:@"paused"]);
   }];
@@ -796,6 +890,9 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
     if (bridge.naviType == BN_NaviTypeSimulator) {
       [[BNaviModel getInstance] resumeSimulator];
     }
+    if ([bridge.voiceEngineType isEqualToString:@"system"] && bridge.speechSynthesizer.isPaused) {
+      [bridge.speechSynthesizer continueSpeaking];
+    }
     [bridge emitEventType:@"navigationResumed" status:@"navigating" extras:nil];
     completion([self navigationPayloadWithSuccess:YES code:@"BAIDU_NAVSDK_NAVIGATION_RESUMED" message:@"Baidu navigation resume requested." navigationId:bridge.navigationId status:@"navigating"]);
   }];
@@ -810,8 +907,19 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
     }
     BNaviService_Strategy.naviSpeakMode = enabled ? BN_SpeakMode_Real_Play : BN_SpeakMode_Real_Mute;
     bridge.voiceEnabled = enabled;
-    NSString *message = enabled ? @"Baidu navigation voice enabled." : @"Baidu navigation voice disabled.";
-    [bridge emitEventType:@"voiceInstructionUpdated" status:@"navigating" extras:@{@"voiceInstructionText": message}];
+    if (!enabled) {
+      [bridge stopSystemSpeech];
+    }
+    NSString *message = enabled ? @"Navigation voice enabled." : @"Navigation voice disabled.";
+    [bridge emitEventType:@"voiceInstructionUpdated"
+                   status:@"navigating"
+                   extras:@{
+                     @"voiceInstructionText": message,
+                     @"nativeDiagnostic": @{
+                       @"voiceEngineType": bridge.voiceEngineType ?: @"external",
+                       @"speechState": enabled ? @"enabled" : @"disabled"
+                     }
+                   }];
     completion([self navigationPayloadWithSuccess:YES code:@"BAIDU_NAVSDK_VOICE_UPDATED" message:message navigationId:bridge.navigationId status:@"navigating"]);
   }];
 }
@@ -950,6 +1058,82 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
   }
 }
 
+#pragma mark - BNNaviSoundDelegate
+
+- (void)onPlayTTS:(NSString *)text userInfo:(nullable NSDictionary *)userInfo {
+  [UtsBaiduNavBridge performOnMainThread:^{
+    NSString *normalizedText = [text isKindOfClass:[NSString class]] ? text : @"";
+    if (normalizedText.length == 0) {
+      return;
+    }
+    [self emitEventType:@"voiceInstructionUpdated"
+                 status:@"navigating"
+                 extras:@{
+                   @"voiceInstructionText": normalizedText,
+                   @"instructionText": normalizedText,
+                   @"nativeDiagnostic": @{
+                     @"voiceEngineType": self.voiceEngineType ?: @"external",
+                     @"speechState": self.voiceEnabled ? @"received" : @"muted"
+                   }
+                 }];
+    [self speakSystemText:normalizedText];
+  }];
+}
+
+- (void)onPlayVoiceSound:(BNVoiceSoundType)type filePath:(NSString *)filePath {
+  [UtsBaiduNavBridge performOnMainThread:^{
+    [self emitEventType:@"voiceInstructionUpdated"
+                 status:@"navigating"
+                 extras:@{
+                   @"nativeDiagnostic": @{
+                     @"voiceEngineType": self.voiceEngineType ?: @"external",
+                     @"speechState": @"soundEffectReceived",
+                     @"soundType": @((NSInteger)type),
+                     @"hasSoundFile": @(filePath.length > 0)
+                   }
+                 }];
+  }];
+}
+
+- (void)onTTSAuthorized:(BOOL)success {
+  NSLog(@"[UtsBaiduNavBridge] sound delegate TTS authorization callback success=%d engine=%@",
+        success,
+        self.voiceEngineType);
+}
+
+- (BOOL)ttsIsPlaying {
+  return [self.voiceEngineType isEqualToString:@"system"] &&
+         (self.speechSynthesizer.isSpeaking || self.speechSynthesizer.isPaused);
+}
+
+- (void)onPlayTTSCompleted:(nullable NSError *)error {
+  NSLog(@"[UtsBaiduNavBridge] sound delegate TTS completed code=%ld", (long)error.code);
+}
+
+- (void)onPlayVoiceSoundCompleted:(nullable NSError *)error {
+  NSLog(@"[UtsBaiduNavBridge] sound delegate sound effect completed code=%ld", (long)error.code);
+}
+
+#pragma mark - AVSpeechSynthesizerDelegate
+
+- (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer
+ didFinishSpeechUtterance:(AVSpeechUtterance *)utterance {
+  [self emitEventType:@"voiceInstructionUpdated"
+               status:@"navigating"
+               extras:@{
+                 @"voiceInstructionText": utterance.speechString ?: @"",
+                 @"nativeDiagnostic": @{
+                   @"voiceEngineType": @"system",
+                   @"speechState": @"finished"
+                 }
+               }];
+}
+
+- (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer
+didCancelSpeechUtterance:(AVSpeechUtterance *)utterance {
+  NSLog(@"[UtsBaiduNavBridge] system TTS utterance cancelled");
+}
+
 - (void)reCalculateNaviRouteDidFinished:(BNaviModel *)model sourceType:(BNCalculateSourceType)sourceType {
   self.replanToken += 1;
   [self emitEventType:@"routeProgressUpdated" status:@"navigating" extras:@{@"instructionText": @"iOS NavSDK route replanning succeeded."}];
@@ -972,8 +1156,8 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
     if (bridge.navigationActive) {
       [BNaviService_naviCoreLogicManager stopNavi:bridge.naviType extParam:nil];
     }
-    [BNaviService_Sound releaseInstance];
     [bridge clearNavigationState];
+    [BNaviService_Sound releaseInstance];
   }];
 }
 
