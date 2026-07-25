@@ -10,7 +10,7 @@ downloads the pinned official dependency during the consuming app build.
 
 ## Dependency
 
-- `BaiduNaviKit-All/TTS` `6.6.7`
+- `BaiduNaviKit-All/TTS` `7.1.0`
 - iOS 12.0 or later
 
 The TTS subspec transitively includes the Navi, Map, and Base subspecs.
@@ -20,7 +20,7 @@ The TTS subspec transitively includes the Navi, Map, and Base subspecs.
 ```ruby
 pod 'UtsBaiduNavBridge',
     :git => 'https://github.com/GM-HaoPeng/uts-baidu-nav-bridge-ios.git',
-    :tag => '0.1.6'
+    :tag => '0.1.7'
 ```
 
 For a DCloud UTS plugin, add the same repository and tag under
@@ -71,6 +71,11 @@ Version `0.1.5` upgrades the official Baidu navigation CocoaPod dependency from
 
 Version `0.1.6` honors `navigationUiMode`: SDK mode presents Baidu's navigation
 UI, while no-UI mode starts and stops only the native navigation core.
+
+Version `0.1.7` adds a combined navigation and built-in TTS authorization entry.
+After `initNaviService` succeeds, it dispatches `authorizeNaviAppKey` and
+`authorizeTTSAppId` in the same initialization stage, matching Baidu's official
+iOS navigation TTS integration sequence.
 
 ## License
 

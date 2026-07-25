@@ -18,6 +18,12 @@ typedef void (^UTSBaiduNavBridgeEventHandler)(NSDictionary<NSString *, id> *even
 + (void)initializeWithAppKey:(NSString *)appKey
                   completion:(UTSBaiduNavBridgeCompletion)completion;
 
++ (void)initializeAndAuthorizeWithAppKey:(NSString *)appKey
+                                ttsAppId:(NSString *)ttsAppId
+                                  apiKey:(NSString *)apiKey
+                               secretKey:(NSString *)secretKey
+                              completion:(UTSBaiduNavBridgePayloadCompletion)completion;
+
 + (void)authorizeTTSWithAppId:(NSString *)appId
                        apiKey:(NSString *)apiKey
                     secretKey:(NSString *)secretKey
