@@ -31,6 +31,7 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
 @property (nonatomic, copy) NSString *activeSystemSpeechText;
 @property (nonatomic, copy) NSString *pendingSystemSpeechText;
 @property (nonatomic, assign) BOOL systemSpeechAudioSessionActive;
+@property (nonatomic, assign) BOOL usesDedicatedSystemSpeechSession;
 
 @end
 
@@ -49,6 +50,11 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
     bridge.activeSystemSpeechText = @"";
     bridge.pendingSystemSpeechText = @"";
     bridge.systemSpeechAudioSessionActive = NO;
+    bridge.usesDedicatedSystemSpeechSession = NO;
+    if (@available(iOS 13.0, *)) {
+      bridge.speechSynthesizer.usesApplicationAudioSession = NO;
+      bridge.usesDedicatedSystemSpeechSession = YES;
+    }
   });
   return bridge;
 }
@@ -643,16 +649,17 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
 }
 
 - (BOOL)prepareSystemSpeechAudioSessionForText:(NSString *)text {
-  if (self.systemSpeechAudioSessionActive) {
+  if (self.usesDedicatedSystemSpeechSession) {
     return YES;
   }
   NSError *sessionError = nil;
   AVAudioSession *session = [AVAudioSession sharedInstance];
   [session setCategory:AVAudioSessionCategoryPlayback
-                  mode:AVAudioSessionModeSpokenAudio
-               options:AVAudioSessionCategoryOptionDuckOthers
+                  mode:AVAudioSessionModeVoicePrompt
+               options:(AVAudioSessionCategoryOptionDuckOthers |
+                        AVAudioSessionCategoryOptionInterruptSpokenAudioAndMixWithOthers)
                  error:&sessionError];
-  if (sessionError == nil) {
+  if (sessionError == nil && !self.systemSpeechAudioSessionActive) {
     [session setActive:YES error:&sessionError];
   }
   if (sessionError != nil) {
@@ -1180,7 +1187,8 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
                  @"voiceInstructionText": utterance.speechString ?: @"",
                  @"nativeDiagnostic": @{
                    @"voiceEngineType": @"system",
-                   @"speechState": @"speaking"
+                   @"speechState": @"speaking",
+                   @"usesDedicatedAudioSession": @(self.usesDedicatedSystemSpeechSession)
                  }
                }];
 }
