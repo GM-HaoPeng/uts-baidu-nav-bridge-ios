@@ -20,7 +20,7 @@ The TTS subspec transitively includes the Navi, Map, and Base subspecs.
 ```ruby
 pod 'UtsBaiduNavBridge',
     :git => 'https://github.com/GM-HaoPeng/uts-baidu-nav-bridge-ios.git',
-    :tag => '0.1.7'
+    :tag => '0.1.8'
 ```
 
 For a DCloud UTS plugin, add the same repository and tag under
@@ -73,9 +73,11 @@ Version `0.1.6` honors `navigationUiMode`: SDK mode presents Baidu's navigation
 UI, while no-UI mode starts and stops only the native navigation core.
 
 Version `0.1.7` adds a combined navigation and built-in TTS authorization entry.
-After `initNaviService` succeeds, it dispatches `authorizeNaviAppKey` and
-`authorizeTTSAppId` in the same initialization stage, matching Baidu's official
-iOS navigation TTS integration sequence.
+
+Version `0.1.8` makes the combined authorization sequence deterministic:
+`initNaviService` succeeds first, `authorizeNaviAppKey` completes successfully
+second, and only then does `authorizeTTSAppId` start. This follows Baidu's
+documented requirement that SDK authorization precede TTS authorization.
 
 ## License
 

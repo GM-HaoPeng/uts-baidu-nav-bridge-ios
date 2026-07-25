@@ -229,28 +229,19 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
       });
     };
 
-    void (^authorizeNavigationAndTTS)(void) = ^{
-      NSLog(@"[UtsBaiduNavBridge] combined authorizeNaviAppKey before");
-      [service authorizeNaviAppKey:appKey
-                        completion:^(BOOL authorized) {
-        [self performOnMainThread:^{
-          NSLog(@"[UtsBaiduNavBridge] combined authorizeNaviAppKey callback success=%d", authorized);
-          navigationFinished = YES;
-          navigationAuthorized = authorized;
-          navigationCode = authorized ? @"BAIDU_NAVSDK_READY" : @"BAIDU_NAVSDK_AUTH_FAILED";
-          navigationMessage = authorized ? @"Baidu navigation SDK initialized and authorized."
-                                         : @"Baidu navigation SDK authorization failed.";
-          finishIfReady();
-        }];
-      }];
-      NSLog(@"[UtsBaiduNavBridge] combined authorizeNaviAppKey after");
-
+    void (^authorizeTTS)(void) = ^{
+      if (completionFinished) {
+        return;
+      }
       NSLog(@"[UtsBaiduNavBridge] combined authorizeTTS before");
       [service authorizeTTSAppId:ttsAppId
                          apiKey:apiKey
                       secretKey:secretKey
                      completion:^(BOOL authorized) {
         [self performOnMainThread:^{
+          if (completionFinished) {
+            return;
+          }
           NSLog(@"[UtsBaiduNavBridge] combined authorizeTTS callback success=%d", authorized);
           ttsFinished = YES;
           ttsAuthorized = authorized;
@@ -261,6 +252,34 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
         }];
       }];
       NSLog(@"[UtsBaiduNavBridge] combined authorizeTTS after");
+    };
+
+    void (^authorizeNavigationThenTTS)(void) = ^{
+      NSLog(@"[UtsBaiduNavBridge] combined authorizeNaviAppKey before");
+      [service authorizeNaviAppKey:appKey
+                        completion:^(BOOL authorized) {
+        [self performOnMainThread:^{
+          if (completionFinished) {
+            return;
+          }
+          NSLog(@"[UtsBaiduNavBridge] combined authorizeNaviAppKey callback success=%d", authorized);
+          navigationFinished = YES;
+          navigationAuthorized = authorized;
+          navigationCode = authorized ? @"BAIDU_NAVSDK_READY" : @"BAIDU_NAVSDK_AUTH_FAILED";
+          navigationMessage = authorized ? @"Baidu navigation SDK initialized and authorized."
+                                         : @"Baidu navigation SDK authorization failed.";
+          if (!authorized) {
+            ttsFinished = YES;
+            ttsCode = @"BAIDU_NAVSDK_TTS_NOT_STARTED";
+            ttsMessage = @"Baidu navigation TTS authorization was not started because navigation authorization failed.";
+            finishIfReady();
+            return;
+          }
+          authorizeTTS();
+          finishIfReady();
+        }];
+      }];
+      NSLog(@"[UtsBaiduNavBridge] combined authorizeNaviAppKey after");
     };
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
@@ -294,7 +313,7 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
 
     if ([service isServicesInited]) {
       NSLog(@"[UtsBaiduNavBridge] combined initNaviService skipped services already initialized");
-      authorizeNavigationAndTTS();
+      authorizeNavigationThenTTS();
       return;
     }
 
@@ -307,7 +326,7 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
           return;
         }
         servicesReady = YES;
-        authorizeNavigationAndTTS();
+        authorizeNavigationThenTTS();
       }];
     }
                         fail:^{
