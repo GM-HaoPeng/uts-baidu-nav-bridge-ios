@@ -28,6 +28,9 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
 @property (nonatomic, assign) BOOL usesSdkUI;
 @property (nonatomic, copy) NSString *voiceEngineType;
 @property (nonatomic, strong) AVSpeechSynthesizer *speechSynthesizer;
+@property (nonatomic, copy) NSString *activeSystemSpeechText;
+@property (nonatomic, copy) NSString *pendingSystemSpeechText;
+@property (nonatomic, assign) BOOL systemSpeechAudioSessionActive;
 
 @end
 
@@ -43,6 +46,9 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
     bridge.voiceEngineType = @"external";
     bridge.speechSynthesizer = [[AVSpeechSynthesizer alloc] init];
     bridge.speechSynthesizer.delegate = bridge;
+    bridge.activeSystemSpeechText = @"";
+    bridge.pendingSystemSpeechText = @"";
+    bridge.systemSpeechAudioSessionActive = NO;
   });
   return bridge;
 }
@@ -613,25 +619,32 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
 - (void)stopSystemSpeech {
   if (![self.voiceEngineType isEqualToString:@"system"] &&
       !self.speechSynthesizer.isSpeaking &&
-      !self.speechSynthesizer.isPaused) {
+      !self.speechSynthesizer.isPaused &&
+      !self.systemSpeechAudioSessionActive) {
     return;
   }
+  self.pendingSystemSpeechText = @"";
+  self.activeSystemSpeechText = @"";
   if (self.speechSynthesizer.isSpeaking || self.speechSynthesizer.isPaused) {
     [self.speechSynthesizer stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
+  }
+  if (!self.systemSpeechAudioSessionActive) {
+    return;
   }
   NSError *sessionError = nil;
   [[AVAudioSession sharedInstance] setActive:NO
                                  withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
                                        error:&sessionError];
+  self.systemSpeechAudioSessionActive = NO;
   if (sessionError != nil) {
     NSLog(@"[UtsBaiduNavBridge] system TTS audio session deactivate failed code=%ld",
           (long)sessionError.code);
   }
 }
 
-- (void)speakSystemText:(NSString *)text {
-  if (!self.voiceEnabled || ![self.voiceEngineType isEqualToString:@"system"] || text.length == 0) {
-    return;
+- (BOOL)prepareSystemSpeechAudioSessionForText:(NSString *)text {
+  if (self.systemSpeechAudioSessionActive) {
+    return YES;
   }
   NSError *sessionError = nil;
   AVAudioSession *session = [AVAudioSession sharedInstance];
@@ -656,10 +669,15 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
                      @"errorCode": @(sessionError.code)
                    }
                  }];
-    return;
+    return NO;
   }
-  if (self.speechSynthesizer.isSpeaking || self.speechSynthesizer.isPaused) {
-    [self.speechSynthesizer stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
+  self.systemSpeechAudioSessionActive = YES;
+  return YES;
+}
+
+- (void)startSystemSpeechText:(NSString *)text {
+  if (![self prepareSystemSpeechAudioSessionForText:text]) {
+    return;
   }
   AVSpeechUtterance *utterance = [AVSpeechUtterance speechUtteranceWithString:text];
   AVSpeechSynthesisVoice *voice = [AVSpeechSynthesisVoice voiceWithLanguage:@"zh-CN"];
@@ -668,7 +686,45 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
   }
   utterance.rate = AVSpeechUtteranceDefaultSpeechRate;
   utterance.volume = 1.0;
+  self.activeSystemSpeechText = text;
   [self.speechSynthesizer speakUtterance:utterance];
+}
+
+- (void)speakSystemText:(NSString *)text {
+  if (!self.voiceEnabled || ![self.voiceEngineType isEqualToString:@"system"] || text.length == 0) {
+    return;
+  }
+  if ([text isEqualToString:self.activeSystemSpeechText] ||
+      [text isEqualToString:self.pendingSystemSpeechText]) {
+    [self emitEventType:@"voiceInstructionUpdated"
+                 status:@"navigating"
+                 extras:@{
+                   @"voiceInstructionText": text,
+                   @"nativeDiagnostic": @{
+                     @"voiceEngineType": @"system",
+                     @"speechState": @"deduplicated"
+                   }
+                 }];
+    return;
+  }
+  if (self.speechSynthesizer.isSpeaking ||
+      self.speechSynthesizer.isPaused ||
+      self.activeSystemSpeechText.length > 0) {
+    BOOL replacedPendingSpeech = self.pendingSystemSpeechText.length > 0;
+    self.pendingSystemSpeechText = text;
+    [self emitEventType:@"voiceInstructionUpdated"
+                 status:@"navigating"
+                 extras:@{
+                   @"voiceInstructionText": text,
+                   @"nativeDiagnostic": @{
+                     @"voiceEngineType": @"system",
+                     @"speechState": @"queuedLatest",
+                     @"replacedPendingSpeech": @(replacedPendingSpeech)
+                   }
+                 }];
+    return;
+  }
+  [self startSystemSpeechText:text];
 }
 
 - (void)applyNavigationPresentationOptions {
@@ -1117,7 +1173,21 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
 #pragma mark - AVSpeechSynthesizerDelegate
 
 - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer
+ didStartSpeechUtterance:(AVSpeechUtterance *)utterance {
+  [self emitEventType:@"voiceInstructionUpdated"
+               status:@"navigating"
+               extras:@{
+                 @"voiceInstructionText": utterance.speechString ?: @"",
+                 @"nativeDiagnostic": @{
+                   @"voiceEngineType": @"system",
+                   @"speechState": @"speaking"
+                 }
+               }];
+}
+
+- (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer
  didFinishSpeechUtterance:(AVSpeechUtterance *)utterance {
+  self.activeSystemSpeechText = @"";
   [self emitEventType:@"voiceInstructionUpdated"
                status:@"navigating"
                extras:@{
@@ -1127,10 +1197,21 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
                    @"speechState": @"finished"
                  }
                }];
+  if (!self.navigationActive ||
+      self.stoppingNavigation ||
+      !self.voiceEnabled ||
+      ![self.voiceEngineType isEqualToString:@"system"] ||
+      self.pendingSystemSpeechText.length == 0) {
+    return;
+  }
+  NSString *nextText = self.pendingSystemSpeechText;
+  self.pendingSystemSpeechText = @"";
+  [self startSystemSpeechText:nextText];
 }
 
 - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer
 didCancelSpeechUtterance:(AVSpeechUtterance *)utterance {
+  self.activeSystemSpeechText = @"";
   NSLog(@"[UtsBaiduNavBridge] system TTS utterance cancelled");
 }
 
