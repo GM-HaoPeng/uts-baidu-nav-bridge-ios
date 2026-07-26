@@ -129,6 +129,12 @@ now uses `AVSpeechSynthesizer` directly with the application's
 while keeping volume in the normal media domain and preserving latest-pending
 instruction scheduling.
 
+Version `0.1.17` defers direct system speech until the Baidu sound-delegate
+callback has returned, then reasserts the application's `playback` /
+`spokenAudio` session. It reasserts the same session again from the synthesizer
+start callback because device logs showed Baidu changing the category to
+`playAndRecord` between receipt and playback.
+
 ## License
 
 The bridge source is available under the MIT License. Baidu SDK components remain

@@ -753,6 +753,7 @@ static NSTimeInterval const UTSBaiduNavBridgeSpeechTransitionDelay = 0.18;
                    @"copiesRenderedAudioBuffers": @(self.usesRenderedSystemSpeech),
                    @"copiesRenderedAudioBuffersSynchronously": @(self.usesRenderedSystemSpeech),
                    @"usesDirectApplicationAudioSessionSpeech": @(!self.usesRenderedSystemSpeech),
+                   @"reassertsAudioSessionAfterBaiduCallback": @(!self.usesRenderedSystemSpeech),
                    @"audioSessionCategory": [AVAudioSession sharedInstance].category ?: @"",
                    @"audioSessionMode": [AVAudioSession sharedInstance].mode ?: @"",
                    @"mediaOutputVolume": @([AVAudioSession sharedInstance].outputVolume),
@@ -961,9 +962,6 @@ static NSTimeInterval const UTSBaiduNavBridgeSpeechTransitionDelay = 0.18;
 }
 
 - (void)startSystemSpeechText:(NSString *)text {
-  if (![self prepareSystemSpeechAudioSessionForText:text]) {
-    return;
-  }
   AVSpeechUtterance *utterance = [AVSpeechUtterance speechUtteranceWithString:text];
   AVSpeechSynthesisVoice *voice = [AVSpeechSynthesisVoice voiceWithLanguage:@"zh-CN"];
   if (voice != nil) {
@@ -973,9 +971,26 @@ static NSTimeInterval const UTSBaiduNavBridgeSpeechTransitionDelay = 0.18;
   utterance.volume = 1.0;
   self.activeSystemSpeechText = text;
   if (self.usesRenderedSystemSpeech) {
+    if (![self prepareSystemSpeechAudioSessionForText:text]) {
+      self.activeSystemSpeechText = @"";
+      return;
+    }
     [self startRenderedSystemSpeechUtterance:utterance];
   } else {
-    [self.speechSynthesizer speakUtterance:utterance];
+    dispatch_async(dispatch_get_main_queue(), ^{
+      if (!self.navigationActive ||
+          self.stoppingNavigation ||
+          !self.voiceEnabled ||
+          ![self.voiceEngineType isEqualToString:@"system"] ||
+          ![self.activeSystemSpeechText isEqualToString:text]) {
+        return;
+      }
+      if (![self prepareSystemSpeechAudioSessionForText:text]) {
+        self.activeSystemSpeechText = @"";
+        return;
+      }
+      [self.speechSynthesizer speakUtterance:utterance];
+    });
   }
 }
 
@@ -1483,6 +1498,7 @@ static NSTimeInterval const UTSBaiduNavBridgeSpeechTransitionDelay = 0.18;
 - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer
  didStartSpeechUtterance:(AVSpeechUtterance *)utterance {
   if (!self.usesRenderedSystemSpeech) {
+    [self prepareSystemSpeechAudioSessionForText:utterance.speechString ?: @""];
     [self emitSystemSpeechStarted:utterance.speechString ?: @""];
   }
 }
