@@ -116,6 +116,12 @@ playback. This prevents `AVSpeechSynthesizer` callback buffers from being reused
 or cleared before `AVAudioPlayerNode` consumes them. Player and mixer gain remain
 at `1.0`, and speaking diagnostics include the current media output volume.
 
+Version `0.1.15` moves the PCM deep copy into the
+`AVSpeechSynthesizer.writeUtterance` callback itself. The callback-owned buffer
+is never retained across the asynchronous main-thread handoff; only the copied
+buffer reaches `AVAudioPlayerNode`. Speaking diagnostics expose
+`copiesRenderedAudioBuffersSynchronously` for device verification.
+
 ## License
 
 The bridge source is available under the MIT License. Baidu SDK components remain

@@ -754,6 +754,7 @@ static NSTimeInterval const UTSBaiduNavBridgeSpeechTransitionDelay = 0.18;
                    @"usesDedicatedAudioSession": @(self.usesDedicatedSystemSpeechSession),
                    @"usesMediaAudioPipeline": @(self.usesRenderedSystemSpeech),
                    @"copiesRenderedAudioBuffers": @(self.usesRenderedSystemSpeech),
+                   @"copiesRenderedAudioBuffersSynchronously": @(self.usesRenderedSystemSpeech),
                    @"mediaOutputVolume": @([AVAudioSession sharedInstance].outputVolume),
                    @"transitionDelayMilliseconds": @(UTSBaiduNavBridgeSpeechTransitionDelay * 1000.0)
                  }
@@ -894,27 +895,24 @@ static NSTimeInterval const UTSBaiduNavBridgeSpeechTransitionDelay = 0.18;
   if (@available(iOS 13.0, *)) {
     [self.speechSynthesizer writeUtterance:utterance
                         toBufferCallback:^(AVAudioBuffer *buffer) {
+    AVAudioPCMBuffer *callbackBuffer = [buffer isKindOfClass:[AVAudioPCMBuffer class]]
+                                         ? (AVAudioPCMBuffer *)buffer
+                                         : nil;
+    BOOL renderCompleted = callbackBuffer == nil || callbackBuffer.frameLength == 0;
+    AVAudioPCMBuffer *scheduledBuffer = renderCompleted
+                                         ? nil
+                                         : [weakSelf copyRenderedSystemSpeechBuffer:callbackBuffer];
     dispatch_async(dispatch_get_main_queue(), ^{
       UtsBaiduNavBridge *strongSelf = weakSelf;
       if (strongSelf == nil || renderToken != strongSelf.systemSpeechRenderToken) {
         return;
       }
-      AVAudioPCMBuffer *pcmBuffer = [buffer isKindOfClass:[AVAudioPCMBuffer class]]
-                                      ? (AVAudioPCMBuffer *)buffer
-                                      : nil;
-      if (pcmBuffer == nil || pcmBuffer.frameLength == 0) {
+      if (renderCompleted) {
         strongSelf.systemSpeechRenderCompleted = YES;
         [strongSelf finishRenderedSystemSpeechIfReady:renderToken];
         return;
       }
       NSString *activeText = strongSelf.activeSystemSpeechText;
-      if (![strongSelf prepareRenderedSystemSpeechEngineForFormat:pcmBuffer.format
-                                                             text:activeText]) {
-        strongSelf.systemSpeechRenderToken += 1;
-        strongSelf.activeSystemSpeechText = @"";
-        return;
-      }
-      AVAudioPCMBuffer *scheduledBuffer = [strongSelf copyRenderedSystemSpeechBuffer:pcmBuffer];
       if (scheduledBuffer == nil) {
         [strongSelf emitEventType:@"voiceInstructionUpdated"
                            status:@"navigating"
@@ -925,6 +923,12 @@ static NSTimeInterval const UTSBaiduNavBridgeSpeechTransitionDelay = 0.18;
                                @"speechState": @"audioBufferCopyFailed"
                              }
                            }];
+        strongSelf.systemSpeechRenderToken += 1;
+        strongSelf.activeSystemSpeechText = @"";
+        return;
+      }
+      if (![strongSelf prepareRenderedSystemSpeechEngineForFormat:scheduledBuffer.format
+                                                             text:activeText]) {
         strongSelf.systemSpeechRenderToken += 1;
         strongSelf.activeSystemSpeechText = @"";
         return;
