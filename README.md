@@ -122,6 +122,13 @@ is never retained across the asynchronous main-thread handoff; only the copied
 buffer reaches `AVAudioPlayerNode`. Speaking diagnostics expose
 `copiesRenderedAudioBuffersSynchronously` for device verification.
 
+Version `0.1.16` disables the PCM player-node path after device logs showed that
+the queue can remain unconsumed while Baidu navigation is active. System speech
+now uses `AVSpeechSynthesizer` directly with the application's
+`playback` / `spokenAudio` session. This restores native completion callbacks
+while keeping volume in the normal media domain and preserving latest-pending
+instruction scheduling.
+
 ## License
 
 The bridge source is available under the MIT License. Baidu SDK components remain

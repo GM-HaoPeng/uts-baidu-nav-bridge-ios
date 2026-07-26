@@ -73,11 +73,8 @@ static NSTimeInterval const UTSBaiduNavBridgeSpeechTransitionDelay = 0.18;
     bridge.systemSpeechScheduledBufferCount = 0;
     if (@available(iOS 13.0, *)) {
       bridge.speechSynthesizer.usesApplicationAudioSession = YES;
-      bridge.systemSpeechAudioEngine = [[AVAudioEngine alloc] init];
-      bridge.systemSpeechPlayerNode = [[AVAudioPlayerNode alloc] init];
-      [bridge.systemSpeechAudioEngine attachNode:bridge.systemSpeechPlayerNode];
-      bridge.usesRenderedSystemSpeech = YES;
     }
+    bridge.usesRenderedSystemSpeech = NO;
   });
   return bridge;
 }
@@ -690,7 +687,7 @@ static NSTimeInterval const UTSBaiduNavBridgeSpeechTransitionDelay = 0.18;
   NSError *sessionError = nil;
   AVAudioSession *session = [AVAudioSession sharedInstance];
   [session setCategory:AVAudioSessionCategoryPlayback
-                  mode:self.usesRenderedSystemSpeech ? AVAudioSessionModeSpokenAudio : AVAudioSessionModeVoicePrompt
+                  mode:AVAudioSessionModeSpokenAudio
                options:(AVAudioSessionCategoryOptionDuckOthers |
                         AVAudioSessionCategoryOptionInterruptSpokenAudioAndMixWithOthers)
                  error:&sessionError];
@@ -755,6 +752,9 @@ static NSTimeInterval const UTSBaiduNavBridgeSpeechTransitionDelay = 0.18;
                    @"usesMediaAudioPipeline": @(self.usesRenderedSystemSpeech),
                    @"copiesRenderedAudioBuffers": @(self.usesRenderedSystemSpeech),
                    @"copiesRenderedAudioBuffersSynchronously": @(self.usesRenderedSystemSpeech),
+                   @"usesDirectApplicationAudioSessionSpeech": @(!self.usesRenderedSystemSpeech),
+                   @"audioSessionCategory": [AVAudioSession sharedInstance].category ?: @"",
+                   @"audioSessionMode": [AVAudioSession sharedInstance].mode ?: @"",
                    @"mediaOutputVolume": @([AVAudioSession sharedInstance].outputVolume),
                    @"transitionDelayMilliseconds": @(UTSBaiduNavBridgeSpeechTransitionDelay * 1000.0)
                  }
