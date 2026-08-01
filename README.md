@@ -15,19 +15,22 @@ downloads the pinned official dependency during the consuming app build.
 
 The TTS subspec transitively includes the Navi, Map, and Base subspecs.
 
-Version `0.1.14` includes iOS system speech for navigation. Pass
+Version `0.1.18` uses the proven `0.1.11` system-speech implementation as its
+runtime baseline. Pass
 `navigationVoice.ttsEngineType = "system"` to receive NavSDK instruction text
 through `BNNaviSoundDelegate` and speak it with `AVSpeechSynthesizer`, without
 Baidu TTS credentials. System speech keeps the current utterance uninterrupted,
 retains only the latest pending instruction, and keeps the audio session active
-for the navigation session to avoid choppy simulated-navigation playback.
+for the navigation session. Before synthesis only, it normalizes malformed
+punctuation such as `。,` and trailing commas; received navigation events preserve
+the original NavSDK text.
 
 ## Installation
 
 ```ruby
 pod 'UtsBaiduNavBridge',
     :git => 'https://github.com/GM-HaoPeng/uts-baidu-nav-bridge-ios.git',
-    :tag => '0.1.14'
+    :tag => '0.1.18'
 ```
 
 For a DCloud UTS plugin, add the same repository and tag under
@@ -100,40 +103,11 @@ iOS 13 and later. iOS 12 falls back to the navigation-specific
 options. This prevents an utterance from remaining paused when NavSDK changes
 the application's audio session.
 
-Version `0.1.12` adds a cancellable 180 ms transition between consecutive
-utterances and normalizes malformed repeated punctuation before synthesis.
-Received navigation events keep their original text, while speech avoids
-zero-gap audio-buffer transitions and punctuation-induced stutter.
-
-Version `0.1.13` renders iOS 13+ system speech into PCM buffers and plays them
-through a plugin-owned `AVAudioEngine` media pipeline. Volume buttons therefore
-control the normal media volume instead of a temporary system prompt volume,
-while scheduled buffers reduce private speech-session interruptions. iOS 12
-keeps the direct `AVSpeechSynthesizer` fallback.
-
-Version `0.1.14` deep-copies every rendered PCM buffer before asynchronous
-playback. This prevents `AVSpeechSynthesizer` callback buffers from being reused
-or cleared before `AVAudioPlayerNode` consumes them. Player and mixer gain remain
-at `1.0`, and speaking diagnostics include the current media output volume.
-
-Version `0.1.15` moves the PCM deep copy into the
-`AVSpeechSynthesizer.writeUtterance` callback itself. The callback-owned buffer
-is never retained across the asynchronous main-thread handoff; only the copied
-buffer reaches `AVAudioPlayerNode`. Speaking diagnostics expose
-`copiesRenderedAudioBuffersSynchronously` for device verification.
-
-Version `0.1.16` disables the PCM player-node path after device logs showed that
-the queue can remain unconsumed while Baidu navigation is active. System speech
-now uses `AVSpeechSynthesizer` directly with the application's
-`playback` / `spokenAudio` session. This restores native completion callbacks
-while keeping volume in the normal media domain and preserving latest-pending
-instruction scheduling.
-
-Version `0.1.17` defers direct system speech until the Baidu sound-delegate
-callback has returned, then reasserts the application's `playback` /
-`spokenAudio` session. It reasserts the same session again from the synthesizer
-start callback because device logs showed Baidu changing the category to
-`playAndRecord` between receipt and playback.
+Version `0.1.18` returns to the `0.1.11` audio and queueing design and adds only
+pre-synthesis punctuation normalization. It intentionally excludes the 180 ms
+transition timer from `0.1.12`, the rendered PCM player path from `0.1.13` to
+`0.1.15`, and the application-shared audio-session changes from `0.1.16` and
+`0.1.17`.
 
 ## License
 
