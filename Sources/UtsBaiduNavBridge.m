@@ -10,6 +10,7 @@
 static NSString *const UTSBaiduNavBridgeMarker = @"BAIDU_IOS_NAVSDK_BRIDGE_POD_IMPORTED";
 static NSTimeInterval const UTSBaiduNavBridgeCallbackTimeout = 20.0;
 static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
+static NSTimeInterval const UTSBaiduNavBridgeSystemSpeechOnsetGuard = 0.12;
 
 @interface UtsBaiduNavBridge () <BNNaviRoutePlanDelegate, BNNaviUIManagerDelegate, BNaviModelDelegate, BNNaviSoundDelegate, AVSpeechSynthesizerDelegate>
 
@@ -715,6 +716,9 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
   }
   utterance.rate = AVSpeechUtteranceDefaultSpeechRate;
   utterance.volume = 1.0;
+  if (self.usesDedicatedSystemSpeechSession) {
+    utterance.preUtteranceDelay = UTSBaiduNavBridgeSystemSpeechOnsetGuard;
+  }
   self.activeSystemSpeechText = text;
   [self.speechSynthesizer speakUtterance:utterance];
 }
@@ -1218,7 +1222,11 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
                    @"speechState": @"speaking",
                    @"usesDedicatedAudioSession": @(self.usesDedicatedSystemSpeechSession),
                    @"normalizesSpeechPunctuation": @YES,
-                   @"usesImmediatePendingSpeechHandoff": @YES
+                   @"usesImmediatePendingSpeechHandoff": @YES,
+                   @"usesUtterancePreDelay": @(self.usesDedicatedSystemSpeechSession),
+                   @"speechOnsetGuardMilliseconds": @(self.usesDedicatedSystemSpeechSession
+                                                        ? UTSBaiduNavBridgeSystemSpeechOnsetGuard * 1000.0
+                                                        : 0.0)
                  }
                }];
 }

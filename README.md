@@ -15,7 +15,7 @@ downloads the pinned official dependency during the consuming app build.
 
 The TTS subspec transitively includes the Navi, Map, and Base subspecs.
 
-Version `0.1.18` uses the proven `0.1.11` system-speech implementation as its
+Version `0.1.19` uses the proven `0.1.11` system-speech implementation as its
 runtime baseline. Pass
 `navigationVoice.ttsEngineType = "system"` to receive NavSDK instruction text
 through `BNNaviSoundDelegate` and speak it with `AVSpeechSynthesizer`, without
@@ -23,14 +23,16 @@ Baidu TTS credentials. System speech keeps the current utterance uninterrupted,
 retains only the latest pending instruction, and keeps the audio session active
 for the navigation session. Before synthesis only, it normalizes malformed
 punctuation such as `。,` and trailing commas; received navigation events preserve
-the original NavSDK text.
+the original NavSDK text. On iOS 13 and later, each utterance uses the official
+`preUtteranceDelay` property for a 120 ms speech-onset guard so the dedicated
+speech output can settle before audible speech begins.
 
 ## Installation
 
 ```ruby
 pod 'UtsBaiduNavBridge',
     :git => 'https://github.com/GM-HaoPeng/uts-baidu-nav-bridge-ios.git',
-    :tag => '0.1.18'
+    :tag => '0.1.19'
 ```
 
 For a DCloud UTS plugin, add the same repository and tag under
@@ -108,6 +110,12 @@ pre-synthesis punctuation normalization. It intentionally excludes the 180 ms
 transition timer from `0.1.12`, the rendered PCM player path from `0.1.13` to
 `0.1.15`, and the application-shared audio-session changes from `0.1.16` and
 `0.1.17`.
+
+Version `0.1.19` keeps the complete `0.1.18` runtime path and adds only a 120 ms
+`AVSpeechUtterance.preUtteranceDelay` on iOS 13 and later. This is an utterance
+onset guard, not a bridge transition timer: pending speech is still handed to
+the synthesizer immediately, and the bridge still avoids rendered PCM and the
+application-shared audio session.
 
 ## License
 
