@@ -15,7 +15,7 @@ downloads the pinned official dependency during the consuming app build.
 
 The TTS subspec transitively includes the Navi, Map, and Base subspecs.
 
-Version `0.1.19` uses the proven `0.1.11` system-speech implementation as its
+Version `0.1.20` uses the proven `0.1.11` system-speech implementation as its
 runtime baseline. Pass
 `navigationVoice.ttsEngineType = "system"` to receive NavSDK instruction text
 through `BNNaviSoundDelegate` and speak it with `AVSpeechSynthesizer`, without
@@ -23,16 +23,15 @@ Baidu TTS credentials. System speech keeps the current utterance uninterrupted,
 retains only the latest pending instruction, and keeps the audio session active
 for the navigation session. Before synthesis only, it normalizes malformed
 punctuation such as `。,` and trailing commas; received navigation events preserve
-the original NavSDK text. On iOS 13 and later, each utterance uses the official
-`preUtteranceDelay` property for a 120 ms speech-onset guard so the dedicated
-speech output can settle before audible speech begins.
+the original NavSDK text. Before route planning, system and external speech set
+the NavSDK `useSystemTTS` strategy to `YES`; built-in Baidu TTS sets it to `NO`.
 
 ## Installation
 
 ```ruby
 pod 'UtsBaiduNavBridge',
     :git => 'https://github.com/GM-HaoPeng/uts-baidu-nav-bridge-ios.git',
-    :tag => '0.1.19'
+    :tag => '0.1.20'
 ```
 
 For a DCloud UTS plugin, add the same repository and tag under
@@ -116,6 +115,12 @@ Version `0.1.19` keeps the complete `0.1.18` runtime path and adds only a 120 ms
 onset guard, not a bridge transition timer: pending speech is still handed to
 the synthesizer immediately, and the bridge still avoids rendered PCM and the
 application-shared audio session.
+
+Version `0.1.20` removes the ineffective `0.1.19` onset delay and applies the
+official NavSDK `useSystemTTS` strategy before route planning. This makes system
+and external speech explicitly use the custom TTS callback path while preserving
+the `0.1.18` direct synthesizer, dedicated-session, queueing, and punctuation
+behavior. Built-in Baidu TTS remains available through `useSystemTTS = NO`.
 
 ## License
 

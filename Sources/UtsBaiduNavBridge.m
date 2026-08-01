@@ -10,7 +10,6 @@
 static NSString *const UTSBaiduNavBridgeMarker = @"BAIDU_IOS_NAVSDK_BRIDGE_POD_IMPORTED";
 static NSTimeInterval const UTSBaiduNavBridgeCallbackTimeout = 20.0;
 static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
-static NSTimeInterval const UTSBaiduNavBridgeSystemSpeechOnsetGuard = 0.12;
 
 @interface UtsBaiduNavBridge () <BNNaviRoutePlanDelegate, BNNaviUIManagerDelegate, BNaviModelDelegate, BNNaviSoundDelegate, AVSpeechSynthesizerDelegate>
 
@@ -597,6 +596,7 @@ static NSTimeInterval const UTSBaiduNavBridgeSystemSpeechOnsetGuard = 0.12;
   if ([self usesCustomSoundDelegate]) {
     [BNaviService_Sound setSoundDelegate:nil];
   }
+  BNaviService_Strategy.useSystemTTS = NO;
   self.navigationActive = NO;
   self.stoppingNavigation = NO;
   self.usesSdkUI = NO;
@@ -621,6 +621,13 @@ static NSTimeInterval const UTSBaiduNavBridgeSystemSpeechOnsetGuard = 0.12;
   } else {
     [BNaviService_Sound setSoundDelegate:nil];
   }
+}
+
+- (void)applyNavigationSpeechStrategy {
+  BOOL usesSystemTTS = [self usesCustomSoundDelegate];
+  BNaviService_Strategy.useSystemTTS = usesSystemTTS;
+  BNaviService_Strategy.naviSpeakMode = self.voiceEnabled ? BN_SpeakMode_Real_Play : BN_SpeakMode_Real_Mute;
+  [self configureSoundDelegate];
 }
 
 - (void)stopSystemSpeech {
@@ -716,9 +723,6 @@ static NSTimeInterval const UTSBaiduNavBridgeSystemSpeechOnsetGuard = 0.12;
   }
   utterance.rate = AVSpeechUtteranceDefaultSpeechRate;
   utterance.volume = 1.0;
-  if (self.usesDedicatedSystemSpeechSession) {
-    utterance.preUtteranceDelay = UTSBaiduNavBridgeSystemSpeechOnsetGuard;
-  }
   self.activeSystemSpeechText = text;
   [self.speechSynthesizer speakUtterance:utterance];
 }
@@ -767,8 +771,7 @@ static NSTimeInterval const UTSBaiduNavBridgeSystemSpeechOnsetGuard = 0.12;
 }
 
 - (void)applyNavigationPresentationOptions {
-  BNaviService_Strategy.naviSpeakMode = self.voiceEnabled ? BN_SpeakMode_Real_Play : BN_SpeakMode_Real_Mute;
-  [self configureSoundDelegate];
+  [self applyNavigationSpeechStrategy];
   if (self.cameraFollowingEnabled) {
     [[BNaviModel getInstance] mapExitViewAllMode];
   } else {
@@ -832,7 +835,7 @@ static NSTimeInterval const UTSBaiduNavBridgeSystemSpeechOnsetGuard = 0.12;
     bridge.stoppingNavigation = NO;
     bridge.startToken += 1;
     NSUInteger token = bridge.startToken;
-    [bridge configureSoundDelegate];
+    [bridge applyNavigationSpeechStrategy];
     [[BNaviModel getInstance] addNaviModelListener:bridge];
     id<BNRoutePlanManagerProtocol> routePlanManager = BNaviService_RoutePlan;
     if (routePlanManager == nil) {
@@ -855,6 +858,7 @@ static NSTimeInterval const UTSBaiduNavBridgeSystemSpeechOnsetGuard = 0.12;
                        @"servicesInitialized": @([[BNaviService getInstance] isServicesInited]),
                        @"nodeCount": @(nodes.count),
                        @"voiceEngineType": bridge.voiceEngineType,
+                       @"navSdkUseSystemTTS": @(BNaviService_Strategy.useSystemTTS),
                        @"respondsToSuccess": @(respondsToSuccess),
                        @"respondsToFailure": @(respondsToFailure),
                        @"respondsToCancel": @(respondsToCancel)
@@ -1000,8 +1004,8 @@ static NSTimeInterval const UTSBaiduNavBridgeSystemSpeechOnsetGuard = 0.12;
       completion([self navigationPayloadWithSuccess:NO code:@"BAIDU_NAVSDK_SESSION_MISSING" message:@"No active Baidu navigation session is available." navigationId:bridge.navigationId status:@"failed"]);
       return;
     }
-    BNaviService_Strategy.naviSpeakMode = enabled ? BN_SpeakMode_Real_Play : BN_SpeakMode_Real_Mute;
     bridge.voiceEnabled = enabled;
+    [bridge applyNavigationSpeechStrategy];
     if (!enabled) {
       [bridge stopSystemSpeech];
     }
@@ -1223,10 +1227,7 @@ static NSTimeInterval const UTSBaiduNavBridgeSystemSpeechOnsetGuard = 0.12;
                    @"usesDedicatedAudioSession": @(self.usesDedicatedSystemSpeechSession),
                    @"normalizesSpeechPunctuation": @YES,
                    @"usesImmediatePendingSpeechHandoff": @YES,
-                   @"usesUtterancePreDelay": @(self.usesDedicatedSystemSpeechSession),
-                   @"speechOnsetGuardMilliseconds": @(self.usesDedicatedSystemSpeechSession
-                                                        ? UTSBaiduNavBridgeSystemSpeechOnsetGuard * 1000.0
-                                                        : 0.0)
+                   @"navSdkUseSystemTTS": @(BNaviService_Strategy.useSystemTTS)
                  }
                }];
 }
