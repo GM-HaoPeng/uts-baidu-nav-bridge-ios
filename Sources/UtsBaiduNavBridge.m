@@ -32,6 +32,8 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
 @property (nonatomic, copy) NSString *pendingSystemSpeechText;
 @property (nonatomic, assign) BOOL systemSpeechAudioSessionActive;
 @property (nonatomic, assign) BOOL usesDedicatedSystemSpeechSession;
+@property (nonatomic, assign) BOOL soundDelegateAttached;
+@property (nonatomic, copy) NSString *soundStrategyFailureMessage;
 
 @end
 
@@ -51,6 +53,8 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
     bridge.pendingSystemSpeechText = @"";
     bridge.systemSpeechAudioSessionActive = NO;
     bridge.usesDedicatedSystemSpeechSession = NO;
+    bridge.soundDelegateAttached = NO;
+    bridge.soundStrategyFailureMessage = @"";
     if (@available(iOS 13.0, *)) {
       bridge.speechSynthesizer.usesApplicationAudioSession = NO;
       bridge.usesDedicatedSystemSpeechSession = YES;
@@ -593,10 +597,24 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
 
 - (void)clearNavigationState {
   [self stopSystemSpeech];
-  if ([self usesCustomSoundDelegate]) {
-    [BNaviService_Sound setSoundDelegate:nil];
+  if (self.soundDelegateAttached) {
+    @try {
+      [BNaviService_Sound setSoundDelegate:nil];
+    } @catch (NSException *exception) {
+      NSLog(@"[UtsBaiduNavBridge] sound delegate detach exception name=%@ reason=%@",
+            exception.name,
+            exception.reason ?: @"");
+    }
+    self.soundDelegateAttached = NO;
   }
-  BNaviService_Strategy.useSystemTTS = NO;
+  @try {
+    BNaviService_Strategy.useSystemTTS = NO;
+  } @catch (NSException *exception) {
+    NSLog(@"[UtsBaiduNavBridge] system TTS strategy reset exception name=%@ reason=%@",
+          exception.name,
+          exception.reason ?: @"");
+  }
+  self.soundStrategyFailureMessage = @"";
   self.navigationActive = NO;
   self.stoppingNavigation = NO;
   self.usesSdkUI = NO;
@@ -615,19 +633,46 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
          [self.voiceEngineType isEqualToString:@"external"];
 }
 
-- (void)configureSoundDelegate {
-  if ([self usesCustomSoundDelegate]) {
-    [BNaviService_Sound setSoundDelegate:self];
-  } else {
-    [BNaviService_Sound setSoundDelegate:nil];
+- (BOOL)configureSoundDelegate {
+  BOOL shouldAttach = [self usesCustomSoundDelegate];
+  if (!shouldAttach && !self.soundDelegateAttached) {
+    return YES;
+  }
+  @try {
+    [BNaviService_Sound setSoundDelegate:shouldAttach ? self : nil];
+    self.soundDelegateAttached = shouldAttach;
+    return YES;
+  } @catch (NSException *exception) {
+    self.soundDelegateAttached = NO;
+    self.soundStrategyFailureMessage = [NSString stringWithFormat:@"Baidu sound delegate configuration failed: %@",
+                                        exception.reason ?: exception.name];
+    NSLog(@"[UtsBaiduNavBridge] sound delegate configure exception name=%@ reason=%@",
+          exception.name,
+          exception.reason ?: @"");
+    return NO;
   }
 }
 
-- (void)applyNavigationSpeechStrategy {
+- (BOOL)applyNavigationSpeechStrategy {
+  self.soundStrategyFailureMessage = @"";
   BOOL usesSystemTTS = [self usesCustomSoundDelegate];
-  BNaviService_Strategy.useSystemTTS = usesSystemTTS;
-  BNaviService_Strategy.naviSpeakMode = self.voiceEnabled ? BN_SpeakMode_Real_Play : BN_SpeakMode_Real_Mute;
-  [self configureSoundDelegate];
+  // BaiduNaviKit-All 7.1.0 must initialize its sound manager before the
+  // useSystemTTS strategy changes the manager's component-selection path.
+  if (![self configureSoundDelegate]) {
+    return NO;
+  }
+  @try {
+    BNaviService_Strategy.useSystemTTS = usesSystemTTS;
+    BNaviService_Strategy.naviSpeakMode = self.voiceEnabled ? BN_SpeakMode_Real_Play : BN_SpeakMode_Real_Mute;
+    return YES;
+  } @catch (NSException *exception) {
+    self.soundStrategyFailureMessage = [NSString stringWithFormat:@"Baidu navigation speech strategy failed: %@",
+                                        exception.reason ?: exception.name];
+    NSLog(@"[UtsBaiduNavBridge] speech strategy exception name=%@ reason=%@",
+          exception.name,
+          exception.reason ?: @"");
+    return NO;
+  }
 }
 
 - (void)stopSystemSpeech {
@@ -771,7 +816,6 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
 }
 
 - (void)applyNavigationPresentationOptions {
-  [self applyNavigationSpeechStrategy];
   if (self.cameraFollowingEnabled) {
     [[BNaviModel getInstance] mapExitViewAllMode];
   } else {
@@ -835,7 +879,17 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
     bridge.stoppingNavigation = NO;
     bridge.startToken += 1;
     NSUInteger token = bridge.startToken;
-    [bridge applyNavigationSpeechStrategy];
+    if (![bridge applyNavigationSpeechStrategy]) {
+      NSString *failureMessage = bridge.soundStrategyFailureMessage.length > 0
+        ? bridge.soundStrategyFailureMessage
+        : @"Baidu navigation sound delegate could not be configured.";
+      [bridge finishStartSuccess:NO
+                            code:@"BAIDU_NAVSDK_SOUND_DELEGATE_FAILED"
+                         message:failureMessage
+                          status:@"failed"];
+      [bridge clearNavigationState];
+      return;
+    }
     [[BNaviModel getInstance] addNaviModelListener:bridge];
     id<BNRoutePlanManagerProtocol> routePlanManager = BNaviService_RoutePlan;
     if (routePlanManager == nil) {
@@ -859,6 +913,8 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
                        @"nodeCount": @(nodes.count),
                        @"voiceEngineType": bridge.voiceEngineType,
                        @"navSdkUseSystemTTS": @(BNaviService_Strategy.useSystemTTS),
+                       @"soundDelegateAttached": @(bridge.soundDelegateAttached),
+                       @"soundDelegateConfiguredBeforeSystemTTSStrategy": @YES,
                        @"respondsToSuccess": @(respondsToSuccess),
                        @"respondsToFailure": @(respondsToFailure),
                        @"respondsToCancel": @(respondsToCancel)
@@ -1005,7 +1061,17 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
       return;
     }
     bridge.voiceEnabled = enabled;
-    [bridge applyNavigationSpeechStrategy];
+    if (![bridge applyNavigationSpeechStrategy]) {
+      NSString *failureMessage = bridge.soundStrategyFailureMessage.length > 0
+        ? bridge.soundStrategyFailureMessage
+        : @"Baidu navigation sound delegate could not be configured.";
+      completion([self navigationPayloadWithSuccess:NO
+                                                code:@"BAIDU_NAVSDK_SOUND_DELEGATE_FAILED"
+                                             message:failureMessage
+                                        navigationId:bridge.navigationId
+                                              status:@"failed"]);
+      return;
+    }
     if (!enabled) {
       [bridge stopSystemSpeech];
     }
@@ -1227,7 +1293,9 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
                    @"usesDedicatedAudioSession": @(self.usesDedicatedSystemSpeechSession),
                    @"normalizesSpeechPunctuation": @YES,
                    @"usesImmediatePendingSpeechHandoff": @YES,
-                   @"navSdkUseSystemTTS": @(BNaviService_Strategy.useSystemTTS)
+                   @"navSdkUseSystemTTS": @(BNaviService_Strategy.useSystemTTS),
+                   @"soundDelegateAttached": @(self.soundDelegateAttached),
+                   @"soundDelegateConfiguredBeforeSystemTTSStrategy": @YES
                  }
                }];
 }
@@ -1285,7 +1353,11 @@ didCancelSpeechUtterance:(AVSpeechUtterance *)utterance {
       [BNaviService_naviCoreLogicManager stopNavi:bridge.naviType extParam:nil];
     }
     [bridge clearNavigationState];
-    [BNaviService_Sound releaseInstance];
+    @try {
+      [BNaviService_Sound releaseInstance];
+    } @catch (NSException *exception) {
+      NSLog(@"[UtsBaiduNavBridge] sound manager release failed: %@", exception.reason ?: @"unknown exception");
+    }
   }];
 }
 

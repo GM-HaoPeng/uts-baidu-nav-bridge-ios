@@ -15,7 +15,7 @@ downloads the pinned official dependency during the consuming app build.
 
 The TTS subspec transitively includes the Navi, Map, and Base subspecs.
 
-Version `0.1.20` uses the proven `0.1.11` system-speech implementation as its
+Version `0.1.21` uses the proven `0.1.11` system-speech implementation as its
 runtime baseline. Pass
 `navigationVoice.ttsEngineType = "system"` to receive NavSDK instruction text
 through `BNNaviSoundDelegate` and speak it with `AVSpeechSynthesizer`, without
@@ -24,14 +24,15 @@ retains only the latest pending instruction, and keeps the audio session active
 for the navigation session. Before synthesis only, it normalizes malformed
 punctuation such as `。,` and trailing commas; received navigation events preserve
 the original NavSDK text. Before route planning, system and external speech set
-the NavSDK `useSystemTTS` strategy to `YES`; built-in Baidu TTS sets it to `NO`.
+the sound delegate before setting the NavSDK `useSystemTTS` strategy to `YES`;
+built-in Baidu TTS sets it to `NO`.
 
 ## Installation
 
 ```ruby
 pod 'UtsBaiduNavBridge',
     :git => 'https://github.com/GM-HaoPeng/uts-baidu-nav-bridge-ios.git',
-    :tag => '0.1.20'
+    :tag => '0.1.21'
 ```
 
 For a DCloud UTS plugin, add the same repository and tag under
@@ -121,6 +122,12 @@ official NavSDK `useSystemTTS` strategy before route planning. This makes system
 and external speech explicitly use the custom TTS callback path while preserving
 the `0.1.18` direct synthesizer, dedicated-session, queueing, and punctuation
 behavior. Built-in Baidu TTS remains available through `useSystemTTS = NO`.
+
+Version `0.1.21` fixes the BaiduNaviKit-All 7.1.0 sound-manager crash exposed by
+`0.1.20`. It registers the sound delegate before changing `useSystemTTS`, keeps
+both operations before route planning, and catches Objective-C exceptions from
+the SDK so an incompatible sound component returns a structured navigation
+failure instead of terminating the host app.
 
 ## License
 
