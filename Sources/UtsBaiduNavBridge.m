@@ -34,6 +34,8 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
 @property (nonatomic, assign) BOOL usesDedicatedSystemSpeechSession;
 @property (nonatomic, assign) BOOL soundDelegateAttached;
 @property (nonatomic, copy) NSString *soundStrategyFailureMessage;
+@property (nonatomic, copy) NSString *lastNavSdkSystemSpeechText;
+@property (nonatomic, assign) BOOL navSdkSystemSpeechActive;
 
 @end
 
@@ -55,6 +57,8 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
     bridge.usesDedicatedSystemSpeechSession = NO;
     bridge.soundDelegateAttached = NO;
     bridge.soundStrategyFailureMessage = @"";
+    bridge.lastNavSdkSystemSpeechText = @"";
+    bridge.navSdkSystemSpeechActive = NO;
     if (@available(iOS 13.0, *)) {
       bridge.speechSynthesizer.usesApplicationAudioSession = NO;
       bridge.usesDedicatedSystemSpeechSession = YES;
@@ -615,6 +619,8 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
           exception.reason ?: @"");
   }
   self.soundStrategyFailureMessage = @"";
+  self.lastNavSdkSystemSpeechText = @"";
+  self.navSdkSystemSpeechActive = NO;
   self.navigationActive = NO;
   self.stoppingNavigation = NO;
   self.usesSdkUI = NO;
@@ -655,14 +661,14 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
 
 - (BOOL)applyNavigationSpeechStrategy {
   self.soundStrategyFailureMessage = @"";
-  BOOL usesSystemTTS = [self usesCustomSoundDelegate];
-  // BaiduNaviKit-All 7.1.0 must initialize its sound manager before the
-  // useSystemTTS strategy changes the manager's component-selection path.
+  BOOL navSdkOwnsSystemSpeech = [self.voiceEngineType isEqualToString:@"system"];
+  // Register first to avoid the Baidu 7.1.0 sound-manager initialization crash.
+  // NavSDK is the sole system-TTS owner; this delegate only observes events.
   if (![self configureSoundDelegate]) {
     return NO;
   }
   @try {
-    BNaviService_Strategy.useSystemTTS = usesSystemTTS;
+    BNaviService_Strategy.useSystemTTS = navSdkOwnsSystemSpeech;
     BNaviService_Strategy.naviSpeakMode = self.voiceEnabled ? BN_SpeakMode_Real_Play : BN_SpeakMode_Real_Mute;
     return YES;
   } @catch (NSException *exception) {
@@ -914,7 +920,8 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
                        @"voiceEngineType": bridge.voiceEngineType,
                        @"navSdkUseSystemTTS": @(BNaviService_Strategy.useSystemTTS),
                        @"soundDelegateAttached": @(bridge.soundDelegateAttached),
-                       @"soundDelegateConfiguredBeforeSystemTTSStrategy": @YES,
+                       @"systemSpeechOwner": [bridge.voiceEngineType isEqualToString:@"system"] ? @"navSdkSystemTTS" : @"none",
+                       @"preventsParallelSdkSystemTTS": @YES,
                        @"respondsToSuccess": @(respondsToSuccess),
                        @"respondsToFailure": @(respondsToFailure),
                        @"respondsToCancel": @(respondsToCancel)
@@ -1231,6 +1238,11 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
     if (normalizedText.length == 0) {
       return;
     }
+    BOOL navSdkOwnsSystemSpeech = [self.voiceEngineType isEqualToString:@"system"];
+    if (navSdkOwnsSystemSpeech) {
+      self.lastNavSdkSystemSpeechText = normalizedText;
+      self.navSdkSystemSpeechActive = self.voiceEnabled;
+    }
     [self emitEventType:@"voiceInstructionUpdated"
                  status:@"navigating"
                  extras:@{
@@ -1238,10 +1250,12 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
                    @"instructionText": normalizedText,
                    @"nativeDiagnostic": @{
                      @"voiceEngineType": self.voiceEngineType ?: @"external",
-                     @"speechState": self.voiceEnabled ? @"received" : @"muted"
+                     @"speechState": self.voiceEnabled ? @"received" : @"muted",
+                     @"systemSpeechOwner": navSdkOwnsSystemSpeech ? @"navSdkSystemTTS" : @"none",
+                     @"bridgeSynthesizesReceivedText": @NO,
+                     @"preventsParallelSdkSystemTTS": @YES
                    }
                  }];
-    [self speakSystemText:normalizedText];
   }];
 }
 
@@ -1267,12 +1281,29 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
 }
 
 - (BOOL)ttsIsPlaying {
-  return [self.voiceEngineType isEqualToString:@"system"] &&
-         (self.speechSynthesizer.isSpeaking || self.speechSynthesizer.isPaused);
+  return [self.voiceEngineType isEqualToString:@"system"] && self.navSdkSystemSpeechActive;
 }
 
 - (void)onPlayTTSCompleted:(nullable NSError *)error {
   NSLog(@"[UtsBaiduNavBridge] sound delegate TTS completed code=%ld", (long)error.code);
+  [UtsBaiduNavBridge performOnMainThread:^{
+    NSString *completedText = self.lastNavSdkSystemSpeechText ?: @"";
+    self.lastNavSdkSystemSpeechText = @"";
+    self.navSdkSystemSpeechActive = NO;
+    [self emitEventType:@"voiceInstructionUpdated"
+                 status:@"navigating"
+                 extras:@{
+                   @"voiceInstructionText": completedText,
+                   @"instructionText": completedText,
+                   @"nativeDiagnostic": @{
+                     @"voiceEngineType": self.voiceEngineType ?: @"external",
+                     @"speechState": error == nil ? @"finished" : @"failed",
+                     @"systemSpeechOwner": [self.voiceEngineType isEqualToString:@"system"] ? @"navSdkSystemTTS" : @"none",
+                     @"bridgeSynthesizesReceivedText": @NO,
+                     @"errorCode": error == nil ? @0 : @(error.code)
+                   }
+                 }];
+  }];
 }
 
 - (void)onPlayVoiceSoundCompleted:(nullable NSError *)error {
@@ -1295,7 +1326,8 @@ static NSTimeInterval const UTSBaiduNavBridgeRouteTimeout = 30.0;
                    @"usesImmediatePendingSpeechHandoff": @YES,
                    @"navSdkUseSystemTTS": @(BNaviService_Strategy.useSystemTTS),
                    @"soundDelegateAttached": @(self.soundDelegateAttached),
-                   @"soundDelegateConfiguredBeforeSystemTTSStrategy": @YES
+                   @"systemSpeechOwner": @"bridgeAVSpeechSynthesizer",
+                   @"preventsParallelSdkSystemTTS": @YES
                  }
                }];
 }

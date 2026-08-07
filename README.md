@@ -15,24 +15,19 @@ downloads the pinned official dependency during the consuming app build.
 
 The TTS subspec transitively includes the Navi, Map, and Base subspecs.
 
-Version `0.1.21` uses the proven `0.1.11` system-speech implementation as its
-runtime baseline. Pass
-`navigationVoice.ttsEngineType = "system"` to receive NavSDK instruction text
-through `BNNaviSoundDelegate` and speak it with `AVSpeechSynthesizer`, without
-Baidu TTS credentials. System speech keeps the current utterance uninterrupted,
-retains only the latest pending instruction, and keeps the audio session active
-for the navigation session. Before synthesis only, it normalizes malformed
-punctuation such as `。,` and trailing commas; received navigation events preserve
-the original NavSDK text. Before route planning, system and external speech set
-the sound delegate before setting the NavSDK `useSystemTTS` strategy to `YES`;
-built-in Baidu TTS sets it to `NO`.
+Version `0.1.22` makes NavSDK the sole iOS system-speech owner. Pass
+`navigationVoice.ttsEngineType = "system"` to set NavSDK `useSystemTTS = YES`;
+the SDK uses iOS system TTS without Baidu TTS credentials. The bridge sound
+delegate observes instruction text and completion events but does not synthesize
+the received text again. `external` only emits instruction events, while
+`baiduBuiltin` keeps the official built-in Baidu TTS path.
 
 ## Installation
 
 ```ruby
 pod 'UtsBaiduNavBridge',
     :git => 'https://github.com/GM-HaoPeng/uts-baidu-nav-bridge-ios.git',
-    :tag => '0.1.21'
+    :tag => '0.1.22'
 ```
 
 For a DCloud UTS plugin, add the same repository and tag under
@@ -128,6 +123,12 @@ Version `0.1.21` fixes the BaiduNaviKit-All 7.1.0 sound-manager crash exposed by
 both operations before route planning, and catches Objective-C exceptions from
 the SDK so an incompatible sound component returns a structured navigation
 failure instead of terminating the host app.
+
+Version `0.1.22` fixes duplicate system speech in `0.1.21`. Baidu's
+`useSystemTTS = YES` means that NavSDK itself speaks through iOS system TTS; it
+does not merely route text to the custom delegate. The bridge therefore enables
+the flag only for `system` mode and does not call its own `AVSpeechSynthesizer`
+for delegate text.
 
 ## License
 
